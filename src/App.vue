@@ -119,11 +119,8 @@ const stopping = ref(false)
 const metricsRows = ref([])
 const metricsColumns = [
   { title: '备注', dataIndex: 'name', key: 'name' },
-  { title: 'P99', dataIndex: 'p99', key: 'p99' },
-  { title: 'P90', dataIndex: 'p90', key: 'p90' },
-  { title: 'P50', dataIndex: 'p50', key: 'p50' },
+  { title: 'Avg', dataIndex: 'avg', key: 'avg' },
   { title: 'Count', dataIndex: 'count', key: 'count' },
-  { title: 'QPS', dataIndex: 'qps', key: 'qps' }
 ]
 const currentRunId = ref(null)
 let statsTimer = null
@@ -405,9 +402,7 @@ async function fetchStats(runId) {
     metricsRows.value = items.map((it, idx) => ({
       key: idx,
       name: it.name ?? '',
-      p99: it.p99 ?? null,
-      p90: it.p90 ?? null,
-      p50: it.p50 ?? null,
+      avg: it.avg ?? null,
       count: it.count ?? null,
       qps: it.qps ?? null
     }))
@@ -425,7 +420,7 @@ function startStatsPolling(runId) {
   }
   // fetch immediately then every 15s
   fetchStats(runId)
-  statsTimer = setInterval(() => fetchStats(runId), 15000)
+  statsTimer = setInterval(() => fetchStats(runId), 5000)
   isPolling.value = true
 }
 
