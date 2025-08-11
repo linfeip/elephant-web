@@ -6,8 +6,17 @@
       <div style="padding: 12px; font-weight: 600">gRPC Proto</div>
       <div style="padding: 12px">
         <a-space direction="vertical" style="width:100%">
-          <a-upload v-model:file-list="protoFileList" multiple accept=".proto" :before-upload="onBeforeUploadProto"
-            :on-remove="onRemoveProto" list-type="text">
+          <a-upload
+            v-model:file-list="protoFileList"
+            multiple
+            accept=".proto"
+            :before-upload="onBeforeUploadProto"
+            :on-remove="onRemoveProto"
+            :custom-request="onCustomProtoRequest"
+            :show-upload-list="{ showPreviewIcon: false, showDownloadIcon: false }"
+            :item-render="uploadItemRender"
+            list-type="text"
+          >
             <a-button>选择 .proto</a-button>
           </a-upload>
           <div>
@@ -19,7 +28,7 @@
       </div>
       <div style="padding: 12px; font-weight: 600">压测流程配置</div>
       <div style="padding: 0 12px 12px">
-        <a-empty v-if="flowTasks.length === 0" description="暂无流程任务，去右侧配置请求后点击 Add" />
+        <a-empty v-if="flowTasks.length === 0" description="暂无流程任务，去右侧配置请求后点击(添加)" />
         <a-list v-else :data-source="flowTasks" size="small" style="max-height: 48vh; overflow: auto">
           <template #renderItem="{ item, index }">
             <a-list-item style="cursor: pointer; display:flex; align-items:center; gap:8px">
@@ -86,7 +95,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, h } from 'vue'
+import { DeleteOutlined } from '@ant-design/icons-vue'
 import { Modal } from 'ant-design-vue'
 import axios from 'axios'
 import api from './lib/apiClient'
@@ -129,7 +139,10 @@ const lastStatsUpdated = ref('')
 
 // 环境变量 UI 已移除，保留 envMap 以兼容 HTTP 中 {{KEY}} 替换
 
-const persistFlow = () => localStorage.setItem('flow:tasks', JSON.stringify(flowTasks.value))
+const persistFlow = () => {
+  localStorage.setItem('flow:tasks', JSON.stringify(flowTasks.value))
+  localStorage.setItem('showDemo', '0')
+}
 const onAddToFlow = (item) => {
   flowTasks.value.push({ ...item, id: Date.now() + ':' + Math.random().toString(36).slice(2) })
   persistFlow()
@@ -161,9 +174,21 @@ const clearFlow = () => {
 }
 
 onMounted(() => {
+  const showDemo = localStorage.getItem('showDemo')
+  let showDemoFlag = showDemo != '0'
   const rawFlow = localStorage.getItem('flow:tasks')
   if (rawFlow) {
     try { flowTasks.value = JSON.parse(rawFlow) } catch { }
+  }
+  if (showDemoFlag && flowTasks.value.length === 0) {
+    // Seed default HTTP GET tasks
+    const defaults = [
+      createDefaultHttpTask('http://47.99.126.118:8080/ping'),
+      createDefaultHttpTask('http://47.99.126.118:8080/ping?delay=1'),
+      createDefaultHttpTask('http://47.99.126.118:8080/testPost', `{"name": "test", "age": 1}`)
+    ]
+    flowTasks.value = defaults
+    persistFlow()
   }
   // restore robot num
   const savedRobot = localStorage.getItem('run:robotNum')
@@ -229,6 +254,34 @@ const onRemoveProto = async (file) => {
   persistProtoFiles(protoFileList.value)
 }
 
+// prevent antd upload from making HTTP requests; read file locally
+const onCustomProtoRequest = async (options) => {
+  const { file, onSuccess, onError } = options
+  try {
+    // attach content and add to list
+    const text = await file.text()
+    file.__content = text
+    if (!file.uid) file.uid = `${Date.now()}_${Math.random().toString(36).slice(2)}`
+    protoFileList.value = [...protoFileList.value, file]
+    await loadProtoFromUploadList()
+    persistProtoFiles(protoFileList.value)
+    onSuccess && onSuccess({}, file)
+  } catch (e) {
+    onError && onError(e)
+  }
+}
+
+// custom list item renderer to avoid anchor previews (which can trigger GET /filename)
+const uploadItemRender = ({ file, actions }) => {
+  return h('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+    h('span', { style: 'flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap' }, file.name),
+    h(DeleteOutlined, {
+      style: 'cursor:pointer; font-size:16px;',
+      onClick: () => actions.remove()
+    })
+  ])
+}
+
 async function loadProtoFromUploadList() {
   protoError.value = ''
   const files = protoFileList.value
@@ -252,8 +305,8 @@ async function loadProtoFromUploadList() {
 function serializeHttpArgs(payload) {
   // payload from HttpClient: { method, url, headers[], bodyMode, bodyText }
   const headersObj = {}
-    ; (payload.headers || []).forEach(h => {
-      if (h.enabled && h.key) headersObj[h.key] = h.value
+    ; (payload.headers || []).forEach(hdr => {
+      if (hdr.key) headersObj[hdr.key] = hdr.value
     })
   return {
     url: payload.url,
@@ -270,6 +323,21 @@ function serializeGrpcArgs(payload) {
     service: payload.service,
     method: payload.method,
     body: payload.requestJson || ''
+  }
+}
+
+function createDefaultHttpTask(url, bodyText = '') {
+  return {
+    id: Date.now() + ':' + Math.random().toString(36).slice(2),
+    type: 'HTTP',
+    title: `GET ${url}`,
+    payload: {
+      method: 'GET',
+      url,
+      headers: [],
+      bodyMode: 'raw',
+      bodyText: ''
+    }
   }
 }
 

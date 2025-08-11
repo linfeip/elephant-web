@@ -30,34 +30,33 @@ export async function buildFilesMapFromFileList(fileList) {
 
 export async function loadProtosFromMap(filesMap, entryFiles) {
   const root = new protobuf.Root()
+  const visited = new Set()
 
-  const originalFetch = protobuf.util.fetch
-  protobuf.util.fetch = function (filename, options, callback) {
-    try {
-      const content = filesMap[filename]
-      if (content == null) return callback(new Error('Proto not found: ' + filename))
-      callback(null, content)
-    } catch (e) {
-      callback(e)
-    }
-  }
-
-  // resolvePath is important for relative imports
-  root.resolvePath = function (origin, target) {
-    const resolved = joinPath(origin || '', target)
+  const resolveImport = (fromFile, target) => {
+    const resolved = joinPath(fromFile || '', target)
     if (filesMap[resolved] != null) return resolved
-    // Try target as-is
     if (filesMap[target] != null) return target
     return resolved
   }
 
-  try {
-    await root.load(entryFiles, { keepCase: true })
-    root.resolveAll()
-    return root
-  } finally {
-    protobuf.util.fetch = originalFetch
+  const parseFile = (filename) => {
+    if (!filename || visited.has(filename)) return
+    const content = filesMap[filename]
+    if (!content) return
+    const res = protobuf.parse(content, root, { keepCase: true })
+    visited.add(filename)
+    const imports = Array.isArray(res.imports) ? res.imports : []
+    for (const imp of imports) {
+      const next = resolveImport(filename, imp)
+      if (filesMap[next]) parseFile(next)
+    }
   }
+
+  const seeds = entryFiles && entryFiles.length ? entryFiles : Object.keys(filesMap)
+  for (const seed of seeds) parseFile(seed)
+
+  root.resolveAll()
+  return root
 }
 
 export function listServices(root) {
