@@ -6,17 +6,10 @@
       <div style="padding: 12px; font-weight: 600">gRPC Proto</div>
       <div style="padding: 12px">
         <a-space direction="vertical" style="width:100%">
-          <a-upload
-            v-model:file-list="protoFileList"
-            multiple
-            accept=".proto"
-            :before-upload="onBeforeUploadProto"
-            :on-remove="onRemoveProto"
-            :custom-request="onCustomProtoRequest"
-            :show-upload-list="{ showPreviewIcon: false, showDownloadIcon: false }"
-            :item-render="uploadItemRender"
-            list-type="text"
-          >
+          <a-upload v-model:file-list="protoFileList" multiple accept=".proto" :before-upload="onBeforeUploadProto"
+            :on-remove="onRemoveProto" :custom-request="onCustomProtoRequest"
+            :show-upload-list="{ showPreviewIcon: false, showDownloadIcon: false }" :item-render="uploadItemRender"
+            list-type="text">
             <a-button>选择 .proto</a-button>
           </a-upload>
           <div>
@@ -185,7 +178,7 @@ onMounted(() => {
     const defaults = [
       createDefaultHttpTask('http://47.99.126.118:8080/ping'),
       createDefaultHttpTask('http://47.99.126.118:8080/ping?delay=1'),
-      createDefaultHttpTask('http://47.99.126.118:8080/testPost', `{"name": "test", "age": 1}`)
+      createDefaultHttpTask('http://47.99.126.118:8080/testPost', 'POST', `{"name": "test", "age": 1}`)
     ]
     flowTasks.value = defaults
     persistFlow()
@@ -213,7 +206,7 @@ onMounted(() => {
 })
 // persist robot num
 watch(robotNum, (v) => {
-  try { localStorage.setItem('run:robotNum', String(v)) } catch {}
+  try { localStorage.setItem('run:robotNum', String(v)) } catch { }
 })
 const canUpdateHttp = computed(() => selectedFlowIndex.value !== -1 && flowTasks.value[selectedFlowIndex.value]?.type === 'HTTP')
 const canUpdateGrpc = computed(() => selectedFlowIndex.value !== -1 && flowTasks.value[selectedFlowIndex.value]?.type === 'gRPC')
@@ -326,17 +319,19 @@ function serializeGrpcArgs(payload) {
   }
 }
 
-function createDefaultHttpTask(url, bodyText = '') {
+function createDefaultHttpTask(url, method = 'GET', bodyText = '') {
   return {
     id: Date.now() + ':' + Math.random().toString(36).slice(2),
     type: 'HTTP',
-    title: `GET ${url}`,
+    title: `${method} ${url}`,
     payload: {
-      method: 'GET',
+      method: method,
       url,
-      headers: [],
+      headers: [
+        { key: 'Content-Type', value: 'application/json' }
+      ],
       bodyMode: 'raw',
-      bodyText: ''
+      bodyText: bodyText
     }
   }
 }
