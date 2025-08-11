@@ -1,0 +1,347 @@
+syntax = "proto3";
+
+package protocol;
+
+option go_package = "./protocol";
+
+// NetHead 网络协议头部
+message NetHead {
+  uint32 ProtoID = 1;      // 协议ID
+  uint32 RequestId = 2;    // 请求ID 如果为0则表示为非请求ID
+  int32 Errno = 3;          // 错误码
+  string Error = 4;        // 错误描述
+}
+
+// 协议ID映射
+enum EMsgType {
+  ENone = 0;
+  ECheckTableArgs = 101;
+  ECheckTableReply = 102;
+  EGetTableArgs = 103;
+  EGetTableReply = 104;
+  EGetManyTableArgs = 105;
+  EGetManyTableReply = 106;
+  ESelectTableArgs = 107;
+  ESelectTableReply = 108;
+  EPatchTableArgs = 109;
+  EPatchTableReply = 110;
+  EPatchManyTableArgs = 111;
+  EPatchManyTableReply = 112;
+  EPatchMultiTableArgs = 113;
+  EPatchMultiTableReply = 114;
+  EEvictTableArgs = 115;
+  EEvictTableReply = 116;
+  EAcquireValueArgs = 117;
+  EAcquireValueReply = 118;
+  EReleaseValueArgs = 119;
+  EReleaseValueReply = 120;
+  EIncrByArgs = 121;
+  EIncrByReply = 122;
+}
+
+
+// ErrTable 错误定义
+enum ErrTable {
+  ErrNone = 0;
+  // @Error("invalid argument")
+  InvalidArgument = 422;
+  // @Error("resource temporarily limited")
+  TemporarilyLimit = 429;
+  // @Error("server internal error")
+  ServerInternal = 500;
+  // @Error("service unavailable")
+  ServerShutdown = 503;
+  // @Error("table key wrong")
+  KeyWrong = 20000;
+  // @Error("table not found")
+  NotFound = 20001;
+  // @Error("table row not found")
+  RowNotFound = 20002;
+  // @Error("table hash incorrect")
+  HashIncorrect = 20003;
+  // @Error("table row duplicate")
+  RowDuplicate = 20004;
+  // @Error("table row ver mismatch")
+  RowVerMismatch = 20005;
+  // @Error("table mgr not enough")
+  MgrNotEnough = 20006;
+  // @Error("write to binlog failed")
+  BinLogWriteWrong = 20007;
+  // @Error("server is busy")
+  ServerIsBusy = 20008;
+  // @Error("service unavailable")
+  ServerUnavailable = 20009;
+  // @Error("server session is invalid")
+  ServerInvalidSession = 20010;
+  //@Error("server session exists")
+  ServerExistsSession = 20011;
+}
+
+//-----------------------------------------------------------------------------------------------
+
+service TableService {
+
+  // CheckTable
+  // 检查表结构一致性
+  rpc CheckTable(CheckTableArgs) returns(CheckTableReply);
+
+  // HandShake
+  // 请求握手
+  rpc Handshake(HandshakeArgs) returns(HandshakeReply);
+
+  // GetTable
+  // 提供一个主键并获取改主键对应的表数据
+  rpc GetTable(GetTableArgs) returns(GetTableReply);
+
+  // GetManyTable
+  // 提供一系列主键列表，返回成功加载到的表数据列表
+  rpc GetManyTable(GetManyTableArgs) returns(GetManyTableReply);
+
+  // GetMultiTable
+  // 多表数据查询
+  rpc GetMultiTable(GetMultiTableArgs) returns(GetMultiTableReply);
+
+  // SelectTable
+  // 提供一个弱键，返回该弱键下关联的全部数据列表
+  rpc SelectTable(SelectTableArgs) returns(SelectTableReply);
+
+  // SelectMultiTable
+  // 提供多个表的弱键，返回这些表的数据集合
+  rpc SelectMultiTable(SelectMultiTableArgs) returns(SelectMultiTableReply);
+
+  // PatchTable
+  // 提供一个主键和需要合并的脏数据进行数据内存合并操作
+  rpc PatchTable(PatchTableArgs) returns(PatchTableReply);
+
+  // PatchManyTable
+  // 提供一批脏数据进行批量合并
+  rpc PatchManyTable(PatchManyTableArgs) returns(PatchManyTableReply);
+
+  // PatchMultiTable
+  // 跨表脏数据合并，支持多张表
+  rpc PatchMultiTable(PatchMultiTableArgs) returns(PatchMultiTableReply);
+
+  // EvictTable
+  // 主动淘汰内存数据
+  rpc EvictTable(EvictTableArgs) returns(EvictTableReply);
+
+  // Acquire
+  // 占用唯一键值 (用于实现例如：玩家名字唯一性，工会名唯一性)需要确保唯一性值的场景
+  rpc AcquireValue(AcquireValueArgs) returns(AcquireValueReply);
+
+  // Release
+  // 释放唯一键值
+  rpc ReleaseValue(ReleaseValueArgs) returns(ReleaseValueReply);
+
+  // IncrBy
+  // 数值自增
+  rpc IncrBy(IncrByArgs) returns(IncrByReply);
+
+  // Heartbeat
+  // 心跳保活
+  rpc Heartbeat(HeartbeatArgs) returns(HeartbeatReply);
+
+  // Shutdown
+  // 资源下线调用接口
+  rpc Shutdown(ShutdownArgs) returns(ShutdownReply);
+}
+
+message Patch {
+  bytes data = 1;    // patch bytes
+  bool deleted = 2;  // deleted
+}
+
+message TablePatch {
+  string table = 1;  // patch table
+  repeated Patch patchs = 2;  // patchs
+}
+
+message Checksum {
+  string table = 1;  // table name
+  int64 hash = 2;    // table hash
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message CheckTableArgs {
+  repeated Checksum checksums = 1;
+}
+
+message CheckTableReply {
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message HandshakeArgs {
+  string key = 1;  // shared key
+  bool readonly = 2; // 是否只读模式
+  string resType = 3; // 资源类型, 避免不同的资源key相同导致session相互冲突顶替问题
+  bool mustNotExists = 4; // 必须不存在已有的Session时才能握手成功
+}
+
+message HandshakeReply {
+  string endpoint = 1; // target dbs endpoint
+  string session = 2; // session
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message GetTableArgs {
+  string table = 1; // table name
+  string key = 2; // table key
+  bool createIfNotFound = 3; // 不存在时是否创建一个
+}
+
+message GetTableReply {
+  bytes tblBytes = 2;  // table bytes
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message GetManyTableArgs {
+  string table = 1; // table name
+  repeated string keys = 2; // table keys
+  bool createIfNotFound = 3; // 不存在时是否创建
+}
+
+message GetManyTableReply {
+  repeated bytes tblBytes = 1;  // table bytes
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message GetMultiTableArgs {
+  repeated GetMultiTable tables = 1;
+  bool createIfNotFound = 2; // 不存在时是否创建
+}
+
+message GetMultiTable {
+  string table = 1;
+  repeated string keys = 2; // table keys
+}
+
+message GetMultiTableReply {
+  repeated MultiTableData tables = 1;
+}
+
+message MultiTableData {
+  string table = 1;
+  repeated bytes tblBytes = 2;  // table bytes
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message SelectTableArgs {
+  string table = 1;  // table name
+  string key = 2;    // table key
+}
+
+message SelectTableReply {
+  repeated string keys = 1; // table keys
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message SelectMultiTableArgs {
+  repeated SelectMultiTable requests = 1; // select requests
+}
+
+message SelectMultiTable {
+  string table = 1;  // table name
+  string key = 2;  // shared key
+  repeated string filterKeys = 3;  // filter keys
+}
+
+message SelectMultiTableReply {
+  repeated MultiTableData tables = 1; // response tables
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message PatchTableArgs {
+  string table = 1;  // table name
+  Patch patch = 2;   // table bytes
+}
+
+message PatchTableReply {
+
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message PatchManyTableArgs {
+  string table = 1;  // table name
+  repeated Patch patchs = 2; // table patchs
+}
+
+message PatchManyTableReply {
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message PatchMultiTableArgs {
+  repeated TablePatch tblPatchs = 1;
+}
+
+message PatchMultiTableReply {
+
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message EvictTableArgs {
+  string key = 1;  // shared key
+  repeated string tables = 2; // 指定淘汰列表
+}
+
+message EvictTableReply {
+
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message AcquireValueArgs {
+  int64 type = 1;    // custom type
+  int64 key = 2;    // unique key
+  string value = 3;  // unique value
+}
+
+message AcquireValueReply {
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message ReleaseValueArgs {
+  int64 type = 1;    // custom type
+  int64 key = 2;    // unique key
+}
+
+message ReleaseValueReply {
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message IncrByArgs {
+  int64 type = 1;    // custom type
+  int64 step = 2;    // incr by the step
+}
+
+message IncrByReply {
+  int64 value = 1; // after the increment
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message HeartbeatArgs {
+}
+
+message HeartbeatReply {
+}
+
+// ---------------------------------------------------------------------------------------------
+
+message ShutdownArgs {
+  repeated string evictTables = 1; // 指定淘汰表列表
+}
+
+message ShutdownReply {}
