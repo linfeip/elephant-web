@@ -24,10 +24,11 @@
         <a-empty v-if="flowTasks.length === 0" description="暂无流程任务，去右侧配置请求后点击(添加)" />
         <a-list v-else :data-source="flowTasks" size="small" style="max-height: 48vh; overflow: auto">
           <template #renderItem="{ item, index }">
-            <a-list-item style="cursor: pointer; display:flex; align-items:center; gap:8px">
+            <a-list-item style="cursor: pointer; display:flex; align-items:center; gap:8px"
+              @click="restoreFlowTask(item, index)">
               <a-tag :color="item.type === 'HTTP' ? 'purple' : 'geekblue'">{{ item.type }}</a-tag>
-              <span style="flex:1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis"
-                @click="restoreFlowTask(item, index)">{{ index + 1 }}. {{ item.title }}</span>
+              <span style="flex:1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ index + 1 }}. {{
+                item.title }}</span>
               <a-button size="small" type="text" danger @click.stop="removeFlowTask(index)">删除</a-button>
             </a-list-item>
           </template>
@@ -88,7 +89,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, h } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, watch, h, nextTick } from 'vue'
 import { DeleteOutlined } from '@ant-design/icons-vue'
 import { Modal } from 'ant-design-vue'
 import axios from 'axios'
@@ -141,15 +142,24 @@ const onAddToFlow = (item) => {
 const httpRef = ref(null)
 const grpcRef = ref(null)
 const selectedFlowIndex = ref(-1)
+const pendingGrpcRestore = ref(null)
 
 const restoreFlowTask = (item, idx) => {
   selectedFlowIndex.value = idx
   if (item.type === 'HTTP') {
     activeTab.value = 'http'
-    httpRef.value?.restore?.(item.payload)
+    nextTick(() => {
+      httpRef.value?.restore?.(item.payload)
+    })
   } else if (item.type === 'gRPC') {
     activeTab.value = 'grpc'
-    grpcRef.value?.restore?.(item.payload)
+    nextTick(() => {
+      if (grpcRef.value?.restore) {
+        grpcRef.value.restore(item.payload)
+      } else {
+        pendingGrpcRestore.value = item.payload
+      }
+    })
   }
 }
 
@@ -173,9 +183,9 @@ onMounted(() => {
   if (showDemoFlag && flowTasks.value.length === 0) {
     // Seed default HTTP GET tasks
     const defaults = [
-      createDefaultHttpTask('http://47.99.126.118:8080/ping'),
-      createDefaultHttpTask('http://47.99.126.118:8080/ping?delay=1'),
-      createDefaultHttpTask('http://47.99.126.118:8080/testPost', 'POST', `{"name": "test", "age": 1}`)
+      createDefaultHttpTask('http://127.0.0.1:8080/ping'),
+      createDefaultHttpTask('http://127.0.0.1:8080/ping?delay=1'),
+      createDefaultHttpTask('http://127.0.0.1:8080/testPost', 'POST', `{"name": "test", "age": 1}`)
     ]
     flowTasks.value = defaults
     persistFlow()
@@ -199,6 +209,13 @@ onMounted(() => {
       }))
       loadProtoFromUploadList()
     } catch { }
+  }
+})
+// Apply pending gRPC restore when tab and ref are ready
+watch([activeTab, grpcRef], () => {
+  if (activeTab.value === 'grpc' && grpcRef.value?.restore && pendingGrpcRestore.value) {
+    grpcRef.value.restore(pendingGrpcRestore.value)
+    pendingGrpcRestore.value = null
   }
 })
 // persist robot num
@@ -310,6 +327,7 @@ function serializeHttpArgs(payload) {
 function serializeGrpcArgs(payload) {
   // For now, pass through the chosen service/method and request JSON as string
   return {
+    addr: payload.addr,
     service: payload.service,
     method: payload.method,
     body: payload.requestJson || ''
@@ -362,9 +380,11 @@ async function runFlow() {
       return null
     }).filter(Boolean)
 
+    const protos = (protoFileList.value || []).map(f => f.__content).filter(Boolean)
     const body = {
       actions,
-      robot: { num: robotNum.value }
+      robot: { num: robotNum.value },
+      protos
     }
 
     const res = await api.post('/run', body)

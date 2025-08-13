@@ -8,10 +8,10 @@
       <a-card size="small" title="调用信息">
         <a-space direction="vertical" style="width:100%">
           <a-input v-model:value="endpointUrl" placeholder="请求地址，例如：127.0.0.1:8090" />
-          <a-select v-model:value="selectedService" placeholder="选择 Service" style="width: 100%" :disabled="!services.length">
+          <a-select v-model:value="selectedService" placeholder="请选择 Service" style="width: 100%" :disabled="!services.length">
             <a-select-option v-for="s in services" :key="s.fullName" :value="s.fullName">{{ s.fullName }}</a-select-option>
           </a-select>
-          <a-select v-model:value="selectedMethod" placeholder="选择 Method" style="width: 100%" :disabled="!availableMethods.length">
+          <a-select v-model:value="selectedMethod" placeholder="请选择 Method" style="width: 100%" :disabled="!availableMethods.length">
             <a-select-option v-for="m in availableMethods" :key="m.name" :value="m.name">{{ m.name }}</a-select-option>
           </a-select>
           <a-textarea v-model:value="requestJson" :auto-size="{minRows:6, maxRows:18}" placeholder='{"name":"world"}' />
@@ -34,7 +34,7 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import axios from 'axios'
+import api from '../lib/apiClient'
 import ResponseViewer from './ResponseViewer.vue'
 import { makeDefaultMessageJson } from '../lib/protoLoader'
 
@@ -57,6 +57,8 @@ const services = computed(() => props.services || [])
 const selectedService = ref(null)
 const selectedMethod = ref(null)
 const suppressAutoFill = ref(false)
+const lastRestoredService = ref(null)
+const lastRestoredMethod = ref(null)
 
 const availableMethods = computed(() => {
   const svc = services.value.find(s => s.fullName === selectedService.value)
@@ -68,10 +70,11 @@ watch(services, (newList) => {
     const existing = newList.find(s => s.fullName === selectedService.value)
     if (existing) {
       const methodExists = (existing.methods || []).some(m => m.name === selectedMethod.value)
-      if (!methodExists) selectedMethod.value = existing.methods[0]?.name || null
+      if (!methodExists) selectedMethod.value = null
     } else {
-      selectedService.value = newList[0].fullName
-      selectedMethod.value = newList[0].methods[0]?.name || null
+      // do not auto select; keep placeholders until user chooses
+      selectedService.value = null
+      selectedMethod.value = null
     }
   } else {
     selectedService.value = null
@@ -89,12 +92,14 @@ watch([selectedService, selectedMethod], () => {
   service.value = svc.fullName
   method.value = m.name
   try {
-    if (suppressAutoFill.value) {
-      suppressAutoFill.value = false
-    } else {
+    const isRestoredSelection = suppressAutoFill.value &&
+      lastRestoredService.value === service.value &&
+      lastRestoredMethod.value === method.value
+    if (!isRestoredSelection) {
       const defaultObj = makeDefaultMessageJson(props.protoRoot, m.requestType)
       requestJson.value = JSON.stringify(defaultObj, null, 2)
     }
+    suppressAutoFill.value = false
   } catch (e) {
     // ignore, keep user input
   }
@@ -109,10 +114,16 @@ const sendRequest = async () => {
   const start = performance.now()
   try {
     if (!endpointUrl.value) throw new Error('请先填写请求地址')
-    let payload
-    try { payload = JSON.parse(requestJson.value || '{}') } catch { payload = { _raw: requestJson.value } }
-    const reqBody = { service: service.value, method: method.value, request: payload }
-    const r = await axios.post(endpointUrl.value, reqBody, { transformResponse: [(d)=>d] })
+    const protos = loadSavedProtoContents()
+    if (!protos.length) throw new Error('未找到已导入的 proto 文件，请先在左侧导入')
+    const body = {
+      protos,
+      addr: endpointUrl.value,
+      service: service.value,
+      method: method.value,
+      body: requestJson.value || ''
+    }
+    const r = await api.post('/grpcCall', body)
     resp.status = r.status
     resp.headers = r.headers || {}
     resp.body = typeof r.data === 'string' ? r.data : JSON.stringify(r.data)
@@ -145,6 +156,9 @@ const restore = (payload) => {
   service.value = payload.service
   method.value = payload.method
   requestJson.value = payload.requestJson
+  endpointUrl.value = payload.addr || ''
+  lastRestoredService.value = payload.service
+  lastRestoredMethod.value = payload.method
 }
 
 const addToFlow = () => {
@@ -154,7 +168,8 @@ const addToFlow = () => {
     payload: {
       service: service.value,
       method: method.value,
-      requestJson: requestJson.value
+      requestJson: requestJson.value,
+      addr: endpointUrl.value
     }
   })
 }
@@ -166,10 +181,23 @@ const updateFlow = () => {
     payload: {
       service: service.value,
       method: method.value,
-      requestJson: requestJson.value
+      requestJson: requestJson.value,
+      addr: endpointUrl.value
     }
   })
 }
 
 defineExpose({ restore })
+
+function loadSavedProtoContents() {
+  try {
+    const raw = localStorage.getItem('grpc:protoFiles')
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    if (!Array.isArray(arr)) return []
+    return arr.map(it => it.content).filter(Boolean)
+  } catch {
+    return []
+  }
+}
 </script>
